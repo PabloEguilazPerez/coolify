@@ -1,0 +1,55 @@
+name: Sync with upstream Coolify
+
+# Merges coollabsio/coolify main into the main branch of this fork every day.
+# Needs the secret FORK_SYNC_TOKEN: a personal access token with the repo and
+# workflow scopes, because upstream changes files in .github/workflows.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: ${{ github.repository != 'coollabsio/coolify' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Merge upstream main and push
+        env:
+          FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "$FORK_SYNC_TOKEN" ]; then
+            echo "::error::The secret FORK_SYNC_TOKEN is missing"
+            exit 1
+          fi
+
+          git clone --branch main "https://x-access-token:${FORK_SYNC_TOKEN}@github.com/${REPOSITORY}.git" fork
+          cd fork
+          git config user.name "fork-sync"
+          git config user.email "fork-sync@users.noreply.github.com"
+          git remote add upstream https://github.com/coollabsio/coolify.git
+          git fetch upstream main
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date with upstream"
+            exit 0
+          fi
+
+          if ! git merge --no-edit upstream/main; then
+            echo "::error::Merge conflict with upstream. Run 'git sync' locally and resolve it."
+            git diff --name-only --diff-filter=U
+            exit 1
+          fi
+
+          git push origin main
+          echo "Merged upstream: $(git rev-parse --short upstream/main)"
